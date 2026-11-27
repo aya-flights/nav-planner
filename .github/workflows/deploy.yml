@@ -1,0 +1,60 @@
+# Builds the app and publishes it to GitHub Pages on every push to main (or manually from the Actions tab).
+# One-time setup in the repo: Settings → Pages → Source: "GitHub Actions",
+# and Settings → Secrets and variables → Actions → New secret CESIUM_ION_TOKEN.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # environment.ts is git-ignored; recreate it from the secret (empty secret → OpenStreetMap fallback).
+      - name: Write Cesium Ion token
+        env:
+          CESIUM_ION_TOKEN: ${{ secrets.CESIUM_ION_TOKEN }}
+        run: |
+          mkdir -p src/environments
+          node -e 'require("fs").writeFileSync("src/environments/environment.ts",
+            "export const environment = { cesiumToken: " + JSON.stringify(process.env.CESIUM_ION_TOKEN || "") + " };\n")'
+
+      # Project sites live at /<repo>/; a <user>.github.io repo lives at the root.
+      - name: Build
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+          case "$REPO" in *.github.io) BASE=/ ;; *) BASE="/$REPO/" ;; esac
+          npx ng build --base-href "$BASE"
+          touch dist/flight-pattern/browser/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/flight-pattern/browser
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

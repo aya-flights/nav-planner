@@ -1,0 +1,75 @@
+<div #globe class="globe"></div>
+
+@if (!hasToken) {
+  <div class="banner">No Cesium Ion token: flat OpenStreetMap only. Set <code>cesiumToken</code> in src/environments/environment.ts for 3D terrain.</div>
+}
+
+@if (mode() === 'plan') {
+  <aside class="side">
+    <h1>C172 Route Planner</h1>
+    <p class="hint">Click the map to add a waypoint · right-click removes the last one</p>
+    <select (change)="addAirport($any($event.target))" aria-label="Add airport">
+      <option value="">+ Add airport…</option>
+      @for (a of airports; track a.name) {
+        <option [value]="$index">{{ a.name }}</option>
+      }
+    </select>
+    <ol>
+      @for (w of waypoints(); track $index; let i = $index) {
+        <li>
+          <input class="name" [value]="w.name" (change)="edit(i, 'name', $any($event.target).value)" aria-label="Waypoint name" />
+          <input class="alt" type="number" step="100" [value]="w.altFt" (change)="edit(i, 'altFt', $any($event.target).value)" aria-label="Altitude (ft MSL)" />
+          <span class="unit">ft</span>
+          <button (click)="move(i, -1)" title="Move up" aria-label="Move up">↑</button>
+          <button (click)="remove(i)" title="Remove" aria-label="Remove">✕</button>
+          @if (isLow(w)) { <span class="warn" title="Less than 1000 ft above terrain">LOW</span> }
+        </li>
+      }
+    </ol>
+    <div class="speeds">
+      <label>Cruise <input type="number" [min]="cruiseRange[0]" [max]="cruiseRange[1]" step="5" [value]="speeds().cruiseKt" (change)="editSpeed('cruiseKt', $any($event.target))" /> kt</label>
+      <label>Climb <input type="number" [min]="climbRange[0]" [max]="climbRange[1]" step="1" [value]="speeds().climbKt" (change)="editSpeed('climbKt', $any($event.target))" /> kt <span class="unit">(Vy 74)</span></label>
+    </div>
+    <p>{{ summary() }}</p>
+    <div class="row">
+      <button class="primary" (click)="fly()" [disabled]="waypoints().length < 2">✈ Fly route</button>
+      <button (click)="update([])">Clear</button>
+      <button (click)="exportRoute()">Export</button>
+      <label class="btn">Import<input type="file" accept=".json,application/json" hidden (change)="importRoute($any($event.target))" /></label>
+    </div>
+  </aside>
+} @else {
+  @if (view() === 'front' || view() === 'low') {
+    @if (state(); as s) {
+      <app-cockpit-panel [state]="s" [nav]="nav()" [terrain]="terrainWarn()" [low]="view() === 'low'" />
+    }
+  } @else {
+    <!-- C172 side window: high wing underside, wing strut, window frame -->
+    <svg class="sidewin" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <g [attr.transform]="view() === 'right' ? 'translate(1600 0) scale(-1 1)' : ''">
+        <!-- Drawn for the left window: strut from window bottom-middle (820,800) up to one third across the top from the left (577,40),
+             i.e. leaning outboard; the right window mirrors it. The wing hides the strut's top end. -->
+        <path d="M820 800 L577 40" stroke="#9ea3a8" stroke-width="68" />
+        <path d="M0 0 H1600 V150 L0 230 Z" fill="#d9dcdf" />
+        <path d="M0 230 L1600 150 V175 L0 250 Z" fill="#b9bdc2" />
+        <path d="M0 0 H1600 V900 H0 Z M90 70 Q90 40 130 40 H1510 Q1550 40 1550 80 V760 Q1550 800 1510 800 H130 Q90 800 90 770 Z" fill="#202224" fill-rule="evenodd" />
+      </g>
+    </svg>
+  }
+  <div class="controls">
+    <button (click)="playing.set(!playing())" [attr.aria-label]="playing() ? 'Pause' : 'Play'">{{ playing() ? '❚❚' : '▶' }}</button>
+    @for (r of rates; track r) {
+      <button [class.on]="rate() === r" (click)="rate.set(r)">{{ r }}×</button>
+    }
+    <input type="range" min="0" [max]="duration()" step="1" [value]="simT()" (input)="seek(+$any($event.target).value)" aria-label="Flight time" />
+    <span>{{ fmt(simT()) }} / {{ fmt(duration()) }}</span>
+    <span class="views">
+      <button [class.on]="view() === 'left'" (click)="setView('left')">◀ Left window</button>
+      <button [class.on]="view() === 'front'" (click)="setView('front')">Cockpit</button>
+      <button [class.on]="view() === 'low'" (click)="setView('low')">Low cockpit</button>
+      <button [class.on]="view() === 'right'" (click)="setView('right')">Right window ▶</button>
+    </span>
+    <button (click)="plan()">Planner</button>
+    <span class="hint">drag: look around · ←/→: windows · hold ↓: low cockpit · C: cockpit · space: pause · Esc: planner</span>
+  </div>
+}
