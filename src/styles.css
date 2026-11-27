@@ -1,2 +1,12 @@
+@import "leaflet/dist/leaflet.css";
+
 html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; background: #000; }
 .cesium-viewer-bottom { z-index: 5; }
+
+/* Ensure Leaflet tiles render smoothly without seam or scale borders */
+.leaflet-container {
+  background: #111 !important;
+}
+.leaflet-tile {
+  image-rendering: auto;
+}

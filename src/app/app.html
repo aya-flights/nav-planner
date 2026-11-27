@@ -1,75 +1,178 @@
-<div #globe class="globe"></div>
+<main class="viewport">
+  <div #globe class="globe" [class.hidden]="mode() === 'fly' && windowView() === 'map'" (contextmenu)="$event.preventDefault()"></div>
 
-@if (!hasToken) {
-  <div class="banner">No Cesium Ion token: flat OpenStreetMap only. Set <code>cesiumToken</code> in src/environments/environment.ts for 3D terrain.</div>
-}
-
-@if (mode() === 'plan') {
-  <aside class="side">
-    <h1>C172 Route Planner</h1>
-    <p class="hint">Click the map to add a waypoint · right-click removes the last one</p>
-    <select (change)="addAirport($any($event.target))" aria-label="Add airport">
-      <option value="">+ Add airport…</option>
-      @for (a of airports; track a.name) {
-        <option [value]="$index">{{ a.name }}</option>
-      }
-    </select>
-    <ol>
-      @for (w of waypoints(); track $index; let i = $index) {
-        <li>
-          <input class="name" [value]="w.name" (change)="edit(i, 'name', $any($event.target).value)" aria-label="Waypoint name" />
-          <input class="alt" type="number" step="100" [value]="w.altFt" (change)="edit(i, 'altFt', $any($event.target).value)" aria-label="Altitude (ft MSL)" />
-          <span class="unit">ft</span>
-          <button (click)="move(i, -1)" title="Move up" aria-label="Move up">↑</button>
-          <button (click)="remove(i)" title="Remove" aria-label="Remove">✕</button>
-          @if (isLow(w)) { <span class="warn" title="Less than 1000 ft above terrain">LOW</span> }
-        </li>
-      }
-    </ol>
-    <div class="speeds">
-      <label>Cruise <input type="number" [min]="cruiseRange[0]" [max]="cruiseRange[1]" step="5" [value]="speeds().cruiseKt" (change)="editSpeed('cruiseKt', $any($event.target))" /> kt</label>
-      <label>Climb <input type="number" [min]="climbRange[0]" [max]="climbRange[1]" step="1" [value]="speeds().climbKt" (change)="editSpeed('climbKt', $any($event.target))" /> kt <span class="unit">(Vy 74)</span></label>
-    </div>
-    <p>{{ summary() }}</p>
-    <div class="row">
-      <button class="primary" (click)="fly()" [disabled]="waypoints().length < 2">✈ Fly route</button>
-      <button (click)="update([])">Clear</button>
-      <button (click)="exportRoute()">Export</button>
-      <label class="btn">Import<input type="file" accept=".json,application/json" hidden (change)="importRoute($any($event.target))" /></label>
-    </div>
-  </aside>
-} @else {
-  @if (view() === 'front' || view() === 'low') {
-    @if (state(); as s) {
-      <app-cockpit-panel [state]="s" [nav]="nav()" [terrain]="terrainWarn()" [low]="view() === 'low'" />
-    }
-  } @else {
-    <!-- C172 side window: high wing underside, wing strut, window frame -->
-    <svg class="sidewin" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <g [attr.transform]="view() === 'right' ? 'translate(1600 0) scale(-1 1)' : ''">
-        <!-- Drawn for the left window: strut from window bottom-middle (820,800) up to one third across the top from the left (577,40),
-             i.e. leaning outboard; the right window mirrors it. The wing hides the strut's top end. -->
-        <path d="M820 800 L577 40" stroke="#9ea3a8" stroke-width="68" />
-        <path d="M0 0 H1600 V150 L0 230 Z" fill="#d9dcdf" />
-        <path d="M0 230 L1600 150 V175 L0 250 Z" fill="#b9bdc2" />
-        <path d="M0 0 H1600 V900 H0 Z M90 70 Q90 40 130 40 H1510 Q1550 40 1550 80 V760 Q1550 800 1510 800 H130 Q90 800 90 770 Z" fill="#202224" fill-rule="evenodd" />
-      </g>
-    </svg>
+  @if (mode() === 'fly' && windowView() === 'map') {
+    <app-moving-map [state]="state()" [waypoints]="waypoints()" [trajectory]="trajectory()" />
   }
-  <div class="controls">
-    <button (click)="playing.set(!playing())" [attr.aria-label]="playing() ? 'Pause' : 'Play'">{{ playing() ? '❚❚' : '▶' }}</button>
-    @for (r of rates; track r) {
-      <button [class.on]="rate() === r" (click)="rate.set(r)">{{ r }}×</button>
+
+  @if (!hasToken) {
+    <div class="banner">No Cesium Ion token: flat OpenStreetMap only. Set <code>cesiumToken</code> in src/environments/environment.ts for 3D terrain.</div>
+  }
+
+  @if (mode() === 'plan') {
+    @if (!panelOpen()) {
+      <button type="button" class="panel-reopen" [class.below-banner]="!hasToken" (click)="panelOpen.set(true)">☰ Route Planner</button>
+    } @else {
+      <aside class="side" [class.below-banner]="!hasToken" aria-label="C172 Route Planner">
+        <div class="side-head">
+          <h1>C172 Route Planner</h1>
+          <button type="button" class="icon-btn" (click)="panelOpen.set(false)" title="Collapse planner" aria-label="Collapse planner">◂</button>
+        </div>
+
+        <div class="mode-bar">
+          <button type="button" class="chip" [class.on]="mapClickAdd()" [attr.aria-pressed]="mapClickAdd()" (click)="mapClickAdd.update(v => !v)">
+            {{ mapClickAdd() ? 'Map click: Add WP' : 'Map click: Pan only' }}
+          </button>
+          <span class="hint">Drag markers · right-click removes last</span>
+        </div>
+
+        @if (status(); as msg) {
+          <div class="status" [class.err]="msg.kind === 'error'" [attr.role]="msg.kind === 'error' ? 'alert' : null" aria-live="polite">
+            <span>{{ msg.text }}</span>
+            <button type="button" class="icon-btn" (click)="status.set(null)" aria-label="Dismiss message">✕</button>
+          </div>
+        }
+
+        <div class="top-actions">
+          <select (change)="addAirport($any($event.target))" aria-label="Add airport">
+            <option value="">+ Add airport…</option>
+            @for (a of airports; track a.name) {
+              <option [value]="$index">{{ a.name }}</option>
+            }
+          </select>
+          <button type="button" (click)="resetDefault()" title="Restore default Herzliya–Haifa route">Default</button>
+        </div>
+
+        <ol class="wp-list" role="list">
+          @for (w of waypoints(); track $index; let i = $index) {
+            <li class="wp-entry">
+              <div class="wp-item">
+                <span class="idx">{{ i + 1 }}</span>
+                <input class="name" maxlength="40" [value]="w.name" (change)="edit(i, 'name', $any($event.target).value)" aria-label="Waypoint {{ i + 1 }} name" />
+                <input class="alt" type="number" step="100" [value]="w.altFt" (change)="edit(i, 'altFt', $any($event.target).value)" aria-label="Waypoint {{ i + 1 }} altitude (ft MSL)" />
+                <span class="unit">ft</span>
+                <button type="button" class="icon-btn" (click)="move(i, -1)" [disabled]="$first" title="Move up" aria-label="Move waypoint {{ i + 1 }} up">↑</button>
+                <button type="button" class="icon-btn" (click)="move(i, 1)" [disabled]="$last" title="Move down" aria-label="Move waypoint {{ i + 1 }} down">↓</button>
+                <button type="button" class="icon-btn" (click)="remove(i)" title="Remove" aria-label="Remove waypoint {{ i + 1 }}">✕</button>
+                @if (isLow(w)) { <span class="warn" title="Less than 1000 ft above terrain">LOW</span> }
+              </div>
+              @if (!$last && legs()[i]; as leg) {
+                <div class="leg-row">
+                  <span class="leg-info">{{ fmtDeg(leg.courseDeg) }}° · {{ leg.distanceNm.toFixed(1) }} NM · {{ fmtShort(leg.eteSec) }}</span>
+                  <button type="button" class="leg-add" (click)="insertBetween(i)" title="Insert midpoint" aria-label="Insert waypoint between {{ i + 1 }} and {{ i + 2 }}">+ WP</button>
+                </div>
+              }
+            </li>
+          }
+        </ol>
+
+        @if (approach(); as app) {
+          <div class="approach-badge">Approach: RWY {{ app.runwayLabel }} ({{ fmtDeg(app.runwayHdg) }}°) · 3° GS from {{ app.fafAltFt }} ft</div>
+        }
+
+        @if (profileChart(); as prof) {
+          <figure class="profile">
+            <svg viewBox="0 0 300 68" role="img" aria-label="Vertical route elevation and terrain clearance profile">
+              <title>Route elevation from {{ prof.minAlt }} ft to {{ prof.maxAlt }} ft MSL</title>
+              <path [attr.d]="prof.terrainPath" fill="#6b5239" opacity="0.7" />
+              @for (seg of prof.segments; track $index) {
+                <line [attr.x1]="seg.x1" [attr.y1]="seg.y1" [attr.x2]="seg.x2" [attr.y2]="seg.y2"
+                  [attr.stroke]="seg.low ? '#e55' : '#4da3ff'" stroke-width="2" />
+              }
+              @for (dot of prof.dots; track $index) {
+                <circle [attr.cx]="dot.cx" [attr.cy]="dot.cy" r="2.8" [attr.fill]="dot.low ? '#e55' : '#ffd84d'" />
+              }
+            </svg>
+            <figcaption class="profile-cap">
+              <span>Terrain profile ({{ prof.minAlt }}–{{ prof.maxAlt }} ft MSL)</span>
+            </figcaption>
+          </figure>
+        }
+
+        <div class="speeds">
+          <label for="cruise-in">Cruise <input id="cruise-in" type="number" [min]="cruiseRange[0]" [max]="cruiseRange[1]" step="5" [value]="speeds().cruiseKt" (change)="editSpeed('cruiseKt', $any($event.target))" /> kt</label>
+          <label for="climb-in">Climb <input id="climb-in" type="number" [min]="climbRange[0]" [max]="climbRange[1]" step="1" [value]="speeds().climbKt" (change)="editSpeed('climbKt', $any($event.target))" /> kt <span class="unit">(Vy 74)</span></label>
+          <div class="wind-row">
+            <label for="wind-dir">Wind <input id="wind-dir" type="number" min="0" max="359" step="10" [value]="wind().dirDeg" (change)="editWind('dirDeg', $any($event.target))" aria-label="Wind direction (degrees true)" />°</label>
+            <span>/</span>
+            <label for="wind-kt"><input id="wind-kt" type="number" [min]="windKtRange[0]" [max]="windKtRange[1]" step="5" [value]="wind().kt" (change)="editWind('kt', $any($event.target))" aria-label="Wind speed (knots)" /> kt</label>
+          </div>
+        </div>
+
+        <p class="summary">{{ summary() }}</p>
+
+        <div class="row">
+          <button type="button" class="primary" (click)="fly()" [disabled]="waypoints().length < 2">✈ Fly route</button>
+          <button type="button" (click)="undo()" [disabled]="!canUndo()" title="Undo (Ctrl/Cmd+Z)">Undo</button>
+          <button type="button" (click)="requestClear()" [disabled]="!waypoints().length">Clear</button>
+          <button type="button" (click)="exportRoute()" [disabled]="!waypoints().length">Export</button>
+          <label class="btn" tabindex="0" (keydown.enter)="$any($event.currentTarget).click()">Import<input type="file" accept=".json,application/json" hidden (change)="importRoute($any($event.target))" /></label>
+        </div>
+      </aside>
     }
-    <input type="range" min="0" [max]="duration()" step="1" [value]="simT()" (input)="seek(+$any($event.target).value)" aria-label="Flight time" />
-    <span>{{ fmt(simT()) }} / {{ fmt(duration()) }}</span>
-    <span class="views">
-      <button [class.on]="view() === 'left'" (click)="setView('left')">◀ Left window</button>
-      <button [class.on]="view() === 'front'" (click)="setView('front')">Cockpit</button>
-      <button [class.on]="view() === 'low'" (click)="setView('low')">Low cockpit</button>
-      <button [class.on]="view() === 'right'" (click)="setView('right')">Right window ▶</button>
-    </span>
-    <button (click)="plan()">Planner</button>
-    <span class="hint">drag: look around · ←/→: windows · hold ↓: low cockpit · C: cockpit · space: pause · Esc: planner</span>
-  </div>
-}
+
+    <dialog #clearDialog class="modal" closedby="any" aria-labelledby="clear-title" (close)="onClearDialogClose()">
+      <h1 id="clear-title">Clear all waypoints?</h1>
+      <p>This removes all {{ waypoints().length }} waypoints from your current route. You can still undo right after clearing.</p>
+      <form method="dialog" class="modal-actions">
+        <button type="submit" value="cancel" autofocus>Cancel</button>
+        <button type="submit" value="confirm" class="danger">Clear route</button>
+      </form>
+    </dialog>
+  } @else {
+    @if (view() === 'front' || view() === 'low') {
+      @if (state(); as s) {
+        <app-cockpit-panel [state]="s" [nav]="nav()" [aglFt]="aglFt()" [terrain]="terrainWarn()" [low]="view() === 'low'" />
+      }
+    } @else {
+      <!-- C172 side window: high wing underside, wing strut, window frame -->
+      <svg class="sidewin" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        <g [attr.transform]="view() === 'right' ? 'translate(1600 0) scale(-1 1)' : ''">
+          <!-- Drawn for the left window: strut from window bottom-middle (820,800) up to one third across the top from the left (577,40),
+               i.e. leaning outboard; the right window mirrors it. The wing hides the strut's top end. -->
+          <path d="M820 800 L577 40" stroke="#9ea3a8" stroke-width="68" />
+          <path d="M0 0 H1600 V150 L0 230 Z" fill="#d9dcdf" />
+          <path d="M0 230 L1600 150 V175 L0 250 Z" fill="#b9bdc2" />
+          <path d="M0 0 H1600 V900 H0 Z M90 70 Q90 40 130 40 H1510 Q1550 40 1550 80 V760 Q1550 800 1510 800 H130 Q90 800 90 770 Z" fill="#202224" fill-rule="evenodd" />
+        </g>
+      </svg>
+    }
+
+    @if (terrainWarn()) {
+      <div class="visually-hidden" role="alert">Terrain clearance warning</div>
+    }
+
+    <div class="controls" [class.below-banner]="!hasToken">
+      <button type="button" (click)="playing.set(!playing())" [attr.aria-label]="playing() ? 'Pause' : 'Play'">{{ playing() ? '❚❚' : '▶' }}</button>
+      @for (r of rates; track r) {
+        <button type="button" [class.on]="rate() === r" (click)="rate.set(r)">{{ r }}×</button>
+      }
+      <input type="range" min="0" [max]="duration()" step="1" [value]="simT()" (input)="seek(+$any($event.target).value)" aria-label="Flight time" />
+      <span class="time">{{ fmt(simT()) }} / {{ fmt(duration()) }}</span>
+      <span class="views">
+        <button type="button" [class.on]="windowView() === 'map'" (click)="toggleWindowView()" title="Toggle Leaflet moving map">{{ windowView() === 'map' ? '🏔 3D Terrain' : '🗺 Map View' }}</button>
+        <button type="button" [class.on]="view() === 'left'" (click)="setView('left')">◀ Left</button>
+        <button type="button" [class.on]="view() === 'front'" (click)="setView('front')">Cockpit</button>
+        <button type="button" [class.on]="view() === 'low'" (click)="setView('low')">Low</button>
+        <button type="button" [class.on]="view() === 'right'" (click)="setView('right')">Right ▶</button>
+      </span>
+      @if (lookOffset()) {
+        <button type="button" class="recenter" (click)="setView(view())">Recenter (C)</button>
+      }
+      <button type="button" (click)="plan()">Planner</button>
+      <button type="button" popovertarget="shortcuts-popover" (click)="toggleShortcutsFallback()" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">?</button>
+    </div>
+
+    <div #shortcutsPopover id="shortcuts-popover" popover="auto" class="shortcuts" aria-label="Flight controls and shortcuts">
+      <h2>Flight Controls</h2>
+      <dl>
+        <dt>Drag map</dt><dd>Look around cockpit</dd>
+        <dt><kbd>C</kbd></dt><dd>Center cockpit view</dd>
+        <dt><kbd>←</kbd> / <kbd>→</kbd></dt><dd>Left / right side windows</dd>
+        <dt>Hold <kbd>↓</kbd></dt><dd>Low cockpit peek</dd>
+        <dt><kbd>Space</kbd></dt><dd>Play / pause simulation</dd>
+        <dt><kbd>Esc</kbd></dt><dd>Return to planner</dd>
+      </dl>
+    </div>
+  }
+</main>

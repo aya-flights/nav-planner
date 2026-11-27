@@ -12,7 +12,9 @@ describe('parseRouteFile', () => {
       ],
     };
     const { waypoints, cruiseKt } = parseRouteFile(JSON.stringify(plan));
-    expect(waypoints.map((w) => [w.name, w.altFt])).toEqual([['LLHZ', 30], ['BAZRA', 1500], ['DEROR', 2500], ['LLIB', 922]]);
+    expect(waypoints.map((w) => [w.name, w.altFt])).toEqual([['LLHZ', 121], ['BAZRA', 1500], ['DEROR', 2500], ['LLIB', 884]]);
+    expect(waypoints[0].runways).toEqual([104, 284]);
+    expect(waypoints[3].runways).toEqual([150, 330]);
     expect(waypoints[1].lon).toBeCloseTo(34.8823);
     expect(cruiseKt).toBe(90);
   });

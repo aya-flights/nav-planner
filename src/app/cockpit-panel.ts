@@ -21,21 +21,26 @@ const vsiA = (fpm: number) => 270 + clamp(fpm, -2000, 2000) * 0.085;
 /** Cessna 172 glareshield, windshield frame and classic six-pack, drawn over the out-the-window view. */
 @Component({
   selector: 'app-cockpit-panel',
-  styles: `:host { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+  styles: `:host { position: fixed; inset: 0; pointer-events: none; z-index: 2; transition: transform 0.3s ease-out; }
     svg { width: 100%; height: 100%; display: block; font-family: system-ui, sans-serif; }
     .dial { fill: #fff; font-size: 13px; text-anchor: middle; dominant-baseline: middle; }
-    .lcd { fill: #6f6; font: 15px ui-monospace, monospace; }`,
+    .lcd { fill: #6f6; font: 15px ui-monospace, monospace; }
+    .terrain-alert { animation: terrain-pulse 1s ease-in-out infinite alternate; }
+    @keyframes terrain-pulse { from { opacity: 1; } to { opacity: 0.45; } }
+    @media (prefers-reduced-motion: reduce) { .terrain-alert { animation: none; } }`,
   template: `
 <!-- low: taller viewBox pushes the panel down; it ends at y=720 so the bottom gauge row is cut off -->
-<svg [attr.viewBox]="low() ? '0 -300 1600 1020' : '0 -110 1600 1010'" preserveAspectRatio="xMidYMax slice">
-  <!-- windshield frame + compass -->
+<svg aria-hidden="true" [attr.viewBox]="low() ? '0 -300 1600 1020' : '0 -110 1600 1010'" preserveAspectRatio="xMidYMax slice">
+  <!-- windshield frame -->
   <path [attr.d]="'M0 -400 H1600 V' + top() + ' H0 Z M0 -400 H-20 L190 520 H0 Z M1600 -400 H1620 L1410 520 H1600 Z'" fill="#202224" />
-  <g [attr.transform]="'translate(800 ' + top() + ')'">
-    <rect x="-34" y="0" width="68" height="34" rx="6" fill="#111" />
-    <text class="lcd" x="0" y="23" text-anchor="middle" fill="#fff">{{ compass() }}</text>
-  </g>
   <path d="M0 515 Q800 465 1600 515 V900 H0 Z" fill="#17181a" />
   <path d="M0 540 Q800 500 1600 540 V900 H0 Z" fill="#45484c" />
+  <!-- glareshield-mounted standby compass (clear of top controls and never cropped on wide screens) -->
+  <g transform="translate(800 448)">
+    <rect x="-5" y="34" width="10" height="14" fill="#111" />
+    <rect x="-36" y="0" width="72" height="36" rx="6" fill="#111" stroke="#333" stroke-width="2" />
+    <text class="lcd" x="0" y="24" text-anchor="middle" fill="#fff">{{ compass() }}</text>
+  </g>
 
   <!-- Airspeed -->
   <g transform="translate(380 630)">
@@ -145,13 +150,13 @@ const vsiA = (fpm: number) => 270 + clamp(fpm, -2000, 2000) * 0.085;
 
   <!-- GPS-ish nav box + annunciator -->
   <g transform="translate(960 590)">
-    <rect width="380" height="130" rx="8" fill="#0a0d0a" stroke="#222" stroke-width="4" />
+    <rect width="385" height="130" rx="8" fill="#0a0d0a" stroke="#222" stroke-width="4" />
     <text class="lcd" x="16" y="30">NEXT {{ nav().name }}</text>
     <text class="lcd" x="16" y="58">DIST {{ nav().distNm.toFixed(1) }} NM  ETE {{ fmt(nav().eteSec) }}</text>
-    <text class="lcd" x="16" y="86">GS {{ state().kias.toFixed(0) }} KT  ALT {{ state().altFt.toFixed(0) }} FT</text>
-    <text class="lcd" x="16" y="114">HDG {{ compass() }}  VS {{ state().vsFpm.toFixed(0) }}</text>
+    <text class="lcd" x="16" y="86">GS {{ state().gsKt.toFixed(0) }} KT  ALT {{ state().altFt.toFixed(0) }} FT</text>
+    <text class="lcd" x="16" y="114">HDG {{ compass() }}  AGL {{ aglFt() !== null ? aglFt() + ' FT' : '---' }}</text>
   </g>
-  <g transform="translate(1360 590)">
+  <g transform="translate(1360 590)" [class.terrain-alert]="terrain()">
     <rect width="110" height="34" rx="4" [attr.fill]="terrain() ? '#d22' : '#311'" />
     <text x="55" y="22" text-anchor="middle" font-size="14" font-weight="700" [attr.fill]="terrain() ? '#fff' : '#633'">TERRAIN</text>
   </g>
@@ -160,6 +165,7 @@ const vsiA = (fpm: number) => 270 + clamp(fpm, -2000, 2000) * 0.085;
 export class CockpitPanel {
   state = input.required<FlightState>();
   nav = input.required<NavInfo>();
+  aglFt = input<number | null>(null);
   terrain = input(false);
   low = input(false);
   /** Bottom edge of the windshield top bar: stays a thin strip at the top of the screen in both layouts. */

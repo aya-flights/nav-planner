@@ -45,10 +45,12 @@
               }
             ],
             "styles": [
+              "node_modules/leaflet/dist/leaflet.css",
               "node_modules/cesium/Build/Cesium/Widgets/widgets.css",
               "src/styles.css"
             ],
             "allowedCommonJsDependencies": [
+              "leaflet",
               "mersenne-twister",
               "urijs",
               "protobufjs",

@@ -1,4 +1,4 @@
-import type { Speeds } from './flight';
+import type { Speeds, Wind } from './flight';
 
 export interface Waypoint {
   name: string;
@@ -6,21 +6,22 @@ export interface Waypoint {
   lon: number;
   altFt: number; // MSL
   groundFt?: number; // terrain under a clicked waypoint, for the low-altitude warning
+  runways?: number[]; // true runway headings (deg) for final approach alignment
 }
 
-// ponytail: approximate field coordinates/elevations — fine for sightseeing, not for navigation.
+/** Israel AIP aerodrome reference points (WGS84), field elevations (ft MSL), and runway true headings. */
 export const AIRPORTS: Waypoint[] = [
-  { name: 'LLHZ Herzliya', lat: 32.1806, lon: 34.8347, altFt: 30 },
-  { name: 'LLHA Haifa', lat: 32.8094, lon: 35.0431, altFt: 30 },
-  { name: 'LLBG Ben Gurion', lat: 32.0114, lon: 34.8867, altFt: 135 },
-  { name: 'LLMG Megiddo', lat: 32.5973, lon: 35.2288, altFt: 200 },
-  { name: 'LLIB Rosh Pina', lat: 32.981, lon: 35.5719, altFt: 922 },
-  { name: 'LLBS Beersheba', lat: 31.287, lon: 34.7228, altFt: 656 },
-  { name: 'LLEY Ein Yahav', lat: 30.6217, lon: 35.2033, altFt: -164 },
-  { name: 'LLER Ramon', lat: 29.7237, lon: 35.0115, altFt: 288 },
+  { name: 'LLHZ Herzliya', lat: 32.1794, lon: 34.8344, altFt: 121, runways: [104, 284] },
+  { name: 'LLHA Haifa', lat: 32.8083, lon: 35.0428, altFt: 28, runways: [160, 340] },
+  { name: 'LLBG Ben Gurion', lat: 32.0094, lon: 34.8856, altFt: 135, runways: [80, 260, 121, 301, 29, 209] },
+  { name: 'LLMG Megiddo', lat: 32.5972, lon: 35.2347, altFt: 200, runways: [91, 271] },
+  { name: 'LLIB Rosh Pina', lat: 32.9808, lon: 35.5719, altFt: 884, runways: [150, 330] },
+  { name: 'LLBS Beersheba', lat: 31.2869, lon: 34.7228, altFt: 656, runways: [139, 319] },
+  { name: 'LLEY Ein Yahav', lat: 30.6217, lon: 35.2031, altFt: -164, runways: [11, 191] },
+  { name: 'LLER Ramon', lat: 29.7272, lon: 35.0142, altFt: 288, runways: [14, 194] },
 ];
 
-const DEFAULT_ROUTE: Waypoint[] = [
+export const DEFAULT_ROUTE: Waypoint[] = [
   AIRPORTS[0],
   { name: 'Netanya', lat: 32.33, lon: 34.845, altFt: 1500 },
   { name: 'Caesarea', lat: 32.5, lon: 34.89, altFt: 1500 },
@@ -37,10 +38,14 @@ export function parseRoute(text: string): Waypoint[] {
     const lat = Number(w?.lat), lon = Number(w?.lon), altFt = Number(w?.altFt), groundFt = Number(w?.groundFt);
     if (![lat, lon, altFt].every(Number.isFinite) || Math.abs(lat) > 90 || Math.abs(lon) > 180)
       throw new Error(`Waypoint ${i + 1} needs numeric lat, lon, altFt`);
+    const runways = Array.isArray(w?.runways)
+      ? w.runways.map(Number).filter((h: number) => Number.isFinite(h) && h >= 0 && h <= 360)
+      : undefined;
     return {
       name: String(w.name ?? `WP${i + 1}`).slice(0, 40),
       lat, lon, altFt,
       groundFt: Number.isFinite(groundFt) ? groundFt : undefined,
+      runways: runways?.length ? runways : undefined,
     };
   });
 }
@@ -67,7 +72,7 @@ export function parseRouteFile(text: string): { waypoints: Waypoint[]; cruiseKt?
     const name = String(w?.name ?? `WP${i + 1}`);
     const airport = AIRPORTS.find((a) => a.name.split(' ')[0] === name.trim().toUpperCase());
     const altFt = (i === 0 || i === last) && airport ? airport.altFt : i === 0 ? def : legAlt(i);
-    return { name, lat: w?.lat, lon: w?.lng ?? w?.lon, altFt };
+    return { name, lat: w?.lat, lon: w?.lng ?? w?.lon, altFt, runways: airport?.runways };
   });
   const cruise = num(data.cruiseSpeed);
   return { waypoints: parseRoute(JSON.stringify(waypoints)), cruiseKt: Number.isFinite(cruise) ? cruise : undefined };
@@ -102,5 +107,30 @@ export function loadSpeeds(defaults: Speeds): Speeds {
 export function setSpeed(current: Speeds, key: keyof Speeds, value: string): Speeds {
   const next = { ...current, [key]: clampKt(value, key === 'cruiseKt' ? CRUISE_RANGE : CLIMB_RANGE, current[key]) };
   localStorage.setItem(SPEEDS_KEY, JSON.stringify(next));
+  return next;
+}
+
+const WIND_KEY = 'c172-wind';
+export const WIND_KT_RANGE = [0, 50] as const;
+
+export function loadWind(defaults: Wind): Wind {
+  try {
+    const w = JSON.parse(localStorage.getItem(WIND_KEY) ?? '{}');
+    const dir = Number(w.dirDeg);
+    return {
+      dirDeg: Number.isFinite(dir) ? ((Math.round(dir) % 360) + 360) % 360 : defaults.dirDeg,
+      kt: clampKt(w.kt, WIND_KT_RANGE, defaults.kt),
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+export function setWind(current: Wind, key: keyof Wind, value: string): Wind {
+  const n = Number(value);
+  const next = key === 'dirDeg'
+    ? { ...current, dirDeg: value !== '' && Number.isFinite(n) ? ((Math.round(n) % 360) + 360) % 360 : current.dirDeg }
+    : { ...current, kt: clampKt(value, WIND_KT_RANGE, current.kt) };
+  localStorage.setItem(WIND_KEY, JSON.stringify(next));
   return next;
 }
